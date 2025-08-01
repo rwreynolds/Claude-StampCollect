@@ -62,6 +62,7 @@ class EnhancedStampGUI:
                 key="stamp_table",
                 select_mode=sg.TABLE_SELECT_MODE_BROWSE,
                 enable_events=True,
+                enable_click_events=True,  # Enable click events for double-click detection
                 auto_size_columns=False,
                 col_widths=[5, 12, 30, 15, 8, 12, 10],
                 num_rows=15,
@@ -139,10 +140,10 @@ class EnhancedStampGUI:
         self.main_layout = [
             [sg.Menu(menu_def)],
             [sg.TabGroup([
-                [sg.Tab('Browse Collection', tab1_layout)],
-                [sg.Tab('Add/Edit Stamps', tab2_layout)],
-                [sg.Tab('Statistics', tab3_layout)]
-            ], expand_x=True, expand_y=True)]
+                [sg.Tab('Browse Collection', tab1_layout, key='tab_browse')],
+                [sg.Tab('Add/Edit Stamps', tab2_layout, key='tab_edit')],
+                [sg.Tab('Statistics', tab3_layout, key='tab_stats')]
+            ], expand_x=True, expand_y=True, key='tab_group')]
         ]
     
     def _refresh_stamp_list(self, stamps=None):
@@ -333,6 +334,15 @@ For Sale Items: {stats['for_sale_items']}
             return False
         return True
 
+    def _switch_to_edit_tab(self):
+        """Switch to the Add/Edit tab"""
+        try:
+            tab_group = self.window.find_element('tab_group')
+            if tab_group is not None:
+                tab_group.update(value='tab_edit')  # Use the key we defined for the edit tab
+        except Exception as e:
+            print(f"Error switching to edit tab: {e}")
+
     def run(self):
         """Main event loop for the GUI"""
         while True:
@@ -345,6 +355,13 @@ For Sale Items: {stats['for_sale_items']}
                 
                 if event in (None, 'Exit'):
                     break
+                
+                # Handle table double-click events
+                if isinstance(event, tuple) and len(event) == 3:
+                    element, event_type, data = event
+                    if element == 'stamp_table' and event_type == '+DOUBLE CLICK+':
+                        self._handle_table_double_click(data)
+                        continue
                 
                 # Handle other events
                 if event == 'Clear Form':
@@ -369,6 +386,18 @@ For Sale Items: {stats['for_sale_items']}
                 sg.popup_error(f"An error occurred: {e}")
         
         self.window.close()
+
+    def _handle_table_double_click(self, data):
+        """Handle double-click on stamp table"""
+        try:
+            row = data[0]  # Get the row that was double-clicked
+            if 0 <= row < len(self.search_results):
+                stamp_id, stamp = self.search_results[row]
+                self.current_stamp_id = stamp_id
+                self._load_stamp_to_form(stamp)
+                self._switch_to_edit_tab()
+        except Exception as e:
+            print(f"Error handling table double-click: {e}")
 
     def _validate_all_fields(self):
         """Validate all form fields"""

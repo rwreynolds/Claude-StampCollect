@@ -19,8 +19,8 @@ class Stamp:
     first_day_cover: bool = False
     location: Optional[str] = None
     notes: Optional[str] = None
-    qty_mint: int = 0
-    qty_used: int = 0
+    qty_mint: Optional[int] = 0
+    qty_used: Optional[int] = 0
     catalog_value_mint: Decimal = Decimal('0.00')
     catalog_value_used: Decimal = Decimal('0.00')
     purchase_price: Decimal = Decimal('0.00')
@@ -34,8 +34,10 @@ class Stamp:
     def calculate_total_value(self) -> Decimal:
         """Calculate total value based on condition"""
         if self.used:
-            return self.catalog_value_used * (self.qty_used or 0)
-        return self.catalog_value_mint * (self.qty_mint or 0)
+            qty = self.qty_used if self.qty_used is not None else 0
+            return self.catalog_value_used * qty
+        qty = self.qty_mint if self.qty_mint is not None else 0
+        return self.catalog_value_mint * qty
 
 class StampCollection:
     def __init__(self):
