@@ -1,0 +1,19 @@
+# Stamp Collection Manager - Requirements
+# Core GUI framework
+FreeSimpleGUI>=4.60.0
+
+# Testing dependencies (optional)
+coverage>=6.0
+pytest>=7.0
+
+# Database (included with Python)
+# sqlite3 - built into Python standard library
+
+# Other dependencies (included with Python standard library)
+# decimal - built into Python
+# datetime - built into Python
+# unittest - built into Python
+# tempfile - built into Python
+# os - built into Python
+# csv - built into Python
+# typing - built into Python (Python 3.5+)

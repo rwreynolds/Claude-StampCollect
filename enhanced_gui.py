@@ -123,7 +123,7 @@ class EnhancedStampGUI:
             [sg.Text("", key="stats_display", size=(60, 6), font=('Courier', 10))]
         ]
         
-        # Main layout with tabs
+        # Main layout with tabs - IMPORTANT: enable_events=True for tab selection detection
         tab1_layout = [
             [sg.Frame("Search", search_frame, expand_x=True)],
             [sg.Frame("Stamp Collection", stamp_list_frame, expand_x=True, expand_y=True)]
@@ -143,12 +143,14 @@ class EnhancedStampGUI:
                 [sg.Tab('Browse Collection', tab1_layout, key='tab_browse')],
                 [sg.Tab('Add/Edit Stamps', tab2_layout, key='tab_edit')],
                 [sg.Tab('Statistics', tab3_layout, key='tab_stats')]
-            ], expand_x=True, expand_y=True, key='tab_group')]
+            ], expand_x=True, expand_y=True, key='tab_group', enable_events=True)]  # Enable events for tab selection
         ]
     
     def _refresh_stamp_list(self, stamps=None):
         """Refresh the stamp list display"""
         if stamps is None:
+            # Reload collection from database to get latest data
+            self.collection = self.db_manager.load_collection()
             stamps = [(None, stamp) for stamp in self.collection.list_stamps()]
         
         table_data = []
@@ -173,6 +175,31 @@ class EnhancedStampGUI:
                 print(f"Error updating stamp table: {e}")
         
         self.search_results = stamps
+    
+    def _refresh_all_stamps_from_database(self):
+        """Refresh the stamp list with all stamps from database (clears any search filters)"""
+        try:
+            # Load all stamps from database
+            self.collection = self.db_manager.load_collection()
+            all_stamps = []
+            
+            # Get stamps with their database IDs by searching for all stamps
+            search_results = self.db_manager.search_stamps({
+                'description': '',
+                'scott_number': '',
+                'country': '',
+                'year_from': '',
+                'year_to': '',
+                'used_only': False,
+                'want_list': False
+            })
+            
+            self._refresh_stamp_list(search_results)
+            print(f"Refreshed stamp list with {len(search_results)} stamps from database")
+            
+        except Exception as e:
+            print(f"Error refreshing stamps from database: {e}")
+            sg.popup_error(f"Error loading stamps: {e}")
     
     def _update_statistics(self):
         """Update statistics display"""
@@ -199,6 +226,27 @@ For Sale Items: {stats['for_sale_items']}
             except Exception as e:
                 print(f"Error updating statistics display: {e}")
 
+    def _handle_tab_selection(self, event):
+        """Handle tab selection events"""
+        try:
+            if event == 'tab_group':
+                # Get the currently selected tab
+                tab_group = self.window.find_element('tab_group')
+                if tab_group is not None:
+                    # The selected tab key will be in the tab_group's value
+                    # Note: Different versions of FreeSimpleGUI might handle this differently
+                    print("Browse Collection tab selected - refreshing stamp list")
+                    self._refresh_all_stamps_from_database()
+            
+            # Alternative method: Check if the tab was specifically clicked
+            # This handles cases where the event might be different
+            elif event in ['tab_browse', 'Browse Collection']:
+                print("Browse Collection tab selected - refreshing stamp list")
+                self._refresh_all_stamps_from_database()
+                
+        except Exception as e:
+            print(f"Error handling tab selection: {e}")
+    
     def _clear_form(self):
         """Clear all form fields"""
         fields = [
@@ -359,6 +407,11 @@ For Sale Items: {stats['for_sale_items']}
                 if event in (None, 'Exit'):
                     break
                 
+                # Handle tab selection events - IMPORTANT: This must come early in the event handling
+                if event == 'tab_group':
+                    self._handle_tab_selection(event)
+                    continue
+                
                 # Handle table double-click events
                 if isinstance(event, tuple) and len(event) == 3:
                     element, event_type, data = event
@@ -416,7 +469,7 @@ For Sale Items: {stats['for_sale_items']}
             stamp = self._create_stamp_from_values(values)
             self.db_manager.add_stamp(stamp)
             self._clear_form()
-            self._refresh_stamp_list()
+            self._refresh_all_stamps_from_database()  # Use the new method that reloads from DB
             self._update_statistics()
             sg.popup("Stamp added successfully!")
         except Exception as e:
@@ -431,7 +484,7 @@ For Sale Items: {stats['for_sale_items']}
             stamp = self._create_stamp_from_values(values)
             self.db_manager.update_stamp(self.current_stamp_id, stamp)
             self._clear_form()
-            self._refresh_stamp_list()
+            self._refresh_all_stamps_from_database()  # Use the new method that reloads from DB
             self._update_statistics()
             sg.popup("Stamp updated successfully!")
         except Exception as e:
@@ -446,7 +499,7 @@ For Sale Items: {stats['for_sale_items']}
             if sg.popup_yes_no("Are you sure you want to delete this stamp?") == 'Yes':
                 self.db_manager.delete_stamp(self.current_stamp_id)
                 self._clear_form()
-                self._refresh_stamp_list()
+                self._refresh_all_stamps_from_database()  # Use the new method that reloads from DB
                 self._update_statistics()
                 sg.popup("Stamp deleted successfully!")
         except Exception as e:
@@ -471,7 +524,7 @@ For Sale Items: {stats['for_sale_items']}
 
     def _clear_search(self):
         """Clear search results and show all stamps"""
-        self._refresh_stamp_list()
+        self._refresh_all_stamps_from_database()  # Use the new method that reloads from DB
         search_fields = ['search_desc', 'search_scott', 'search_country', 
                        'search_year_from', 'search_year_to']
         for field in search_fields:
