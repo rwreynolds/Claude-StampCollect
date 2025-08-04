@@ -51,18 +51,22 @@ class TestEnhancedStampGUICore(unittest.TestCase):
         self.temp_db.close()
         self.db_path = self.temp_db.name
         
+        # Create all mock elements FIRST
+        self.mock_elements = {}
+        self._create_all_mock_elements()
+        
         # Mock the window and its methods
         self.mock_window = MagicMock()
         self.mock_window.read = MagicMock(return_value=(None, {}))
         self.mock_window.close = MagicMock()
-        self.mock_window.find_element = MagicMock()
         
-        # Mock element for form fields
-        self.mock_element = MagicMock()
-        self.mock_element.update = MagicMock()
-        self.mock_element.get = MagicMock(return_value='')
-        self.mock_window.find_element.return_value = self.mock_element
+        # THIS IS CRITICAL: Make sure find_element returns our mock elements
+        def mock_find_element(key):
+            element = self.mock_elements.get(key)
+            print(f"DEBUG: find_element('{key}') returning: {element}")  # Debug output
+            return element
         
+        self.mock_window.find_element = mock_find_element
         mock_sg.Window.return_value = self.mock_window
         
         # Patch DatabaseManager to use our temp database
@@ -80,6 +84,41 @@ class TestEnhancedStampGUICore(unittest.TestCase):
             
             self.gui = EnhancedStampGUI()
             self.gui.db_manager = mock_db_instance
+            
+            # IMPORTANT: Override the GUI's window with our mock AFTER initialization
+            self.gui.window = self.mock_window
+    
+    def _create_all_mock_elements(self):
+        """Create all possible mock elements that might be accessed"""
+        all_fields = [
+            # Basic form fields
+            "scott_number", "description", "country", "year", "denomination",
+            "color", "perforation", "location", "source", "notes", "image_path",
+            # Numeric fields
+            "qty_used", "qty_mint", 
+            # Decimal fields
+            "catalog_value_used", "catalog_value_mint", "purchase_price", "current_market_value",
+            # Date fields
+            "date_acquired",
+            # Dropdown fields
+            "condition_grade", "gum_condition",
+            # Checkbox fields
+            "used", "plate_block", "first_day_cover", "want_list", "for_sale",
+            # Search fields
+            "search_desc", "search_scott", "search_country", "search_year_from", "search_year_to",
+            "search_used", "search_want",
+            # Table
+            "stamp_table",
+            # Tab group
+            "tab_group", "stats_display"
+        ]
+        
+        for field in all_fields:
+            mock_element = MagicMock()
+            mock_element.get = MagicMock(return_value='')
+            mock_element.update = MagicMock()
+            self.mock_elements[field] = mock_element
+            print(f"DEBUG: Created mock element for '{field}': {mock_element}")  # Debug output
     
     def tearDown(self):
         """Clean up after tests"""
@@ -87,6 +126,17 @@ class TestEnhancedStampGUICore(unittest.TestCase):
             os.unlink(self.db_path)
         except OSError:
             pass
+    
+    def test_mock_setup_verification(self):
+        """Test that our mock setup is working correctly"""
+        # This test verifies that find_element returns our mock elements
+        element = self.gui.window.find_element('scott_number')
+        self.assertIsNotNone(element)
+        self.assertEqual(element, self.mock_elements['scott_number'])
+        
+        # Test that the element has the expected methods
+        self.assertTrue(hasattr(element, 'get'))
+        self.assertTrue(hasattr(element, 'update'))
     
     def test_gui_initialization(self):
         """Test GUI initialization"""
@@ -98,98 +148,78 @@ class TestEnhancedStampGUICore(unittest.TestCase):
     
     def test_clear_form_functionality(self):
         """Test clearing form fields"""
-        # Set up mock elements for all form fields
-        form_elements = {}
-        field_names = [
-            "scott_number", "description", "country", "year", "denomination",
-            "color", "perforation", "location", "notes", "image_path", "source",
-            "qty_used", "qty_mint", "catalog_value_used", "catalog_value_mint",
-            "purchase_price", "current_market_value", "date_acquired"
-        ]
+        print("DEBUG: Starting clear_form test")
         
-        for field in field_names:
-            mock_element = MagicMock()
-            form_elements[field] = mock_element
-        
-        # Mock condition and gum dropdowns
-        form_elements["condition_grade"] = MagicMock()
-        form_elements["gum_condition"] = MagicMock()
-        
-        # Mock checkboxes
-        checkbox_names = ["used", "plate_block", "first_day_cover", "want_list", "for_sale"]
-        for checkbox in checkbox_names:
-            form_elements[checkbox] = MagicMock()
-        
-        def mock_find_element(key):
-            return form_elements.get(key)
-        
-        # Replace window's find_element with our mock function directly
-        self.mock_window.find_element = mock_find_element
+        # Reset all mock calls before the test
+        for element in self.mock_elements.values():
+            element.update.reset_mock()
         
         # Call clear form
         self.gui._clear_form()
         
-        # Verify that update was called on elements
-        for field in field_names:
-            if field in ["qty_used", "qty_mint"]:
-                form_elements[field].update.assert_called_with(value='0')
-            elif field in ["catalog_value_used", "catalog_value_mint", "purchase_price", "current_market_value"]:
-                form_elements[field].update.assert_called_with(value='0.00')
-            else:
-                form_elements[field].update.assert_called_with(value='')
+        # Define field groups as they are in the actual method
+        basic_fields = [
+            "scott_number", "description", "country", "year", "denomination",
+            "color", "perforation", "location", "source", "notes", "image_path"
+        ]
+        numeric_fields = ["qty_used", "qty_mint"]
+        decimal_fields = ["catalog_value_used", "catalog_value_mint", "purchase_price", "current_market_value"]
+        date_fields = ["date_acquired"]
+        dropdown_fields = ["condition_grade", "gum_condition"]
+        checkbox_names = ["used", "plate_block", "first_day_cover", "want_list", "for_sale"]
         
-        # Verify dropdowns were reset
-        form_elements["condition_grade"].update.assert_called_with(value='Unknown')
-        form_elements["gum_condition"].update.assert_called_with(value='Unknown')
+        print(f"DEBUG: Checking basic fields: {basic_fields}")
         
-        # Verify checkboxes were cleared
+        # Verify that update was called on basic text fields with empty strings
+        for field in basic_fields:
+            element = self.mock_elements[field]
+            print(f"DEBUG: Checking {field}, update called: {element.update.called}, calls: {element.update.call_args_list}")
+            self.mock_elements[field].update.assert_called_with(value='')
+        
+        # Verify numeric fields get '0'
+        for field in numeric_fields:
+            self.mock_elements[field].update.assert_called_with(value='0')
+        
+        # Verify decimal fields get '0.00'  
+        for field in decimal_fields:
+            self.mock_elements[field].update.assert_called_with(value='0.00')
+        
+        # Verify date field gets empty string
+        for field in date_fields:
+            self.mock_elements[field].update.assert_called_with(value='')
+        
+        # Verify dropdowns were reset to 'Unknown'
+        for field in dropdown_fields:
+            self.mock_elements[field].update.assert_called_with(value='Unknown')
+        
+        # Verify checkboxes were cleared (set to False)
         for checkbox in checkbox_names:
-            form_elements[checkbox].update.assert_called_with(value=False)
+            self.mock_elements[checkbox].update.assert_called_with(value=False)
         
         # Verify current_stamp_id was cleared
         self.assertIsNone(self.gui.current_stamp_id)
     
     def test_validate_required_fields_success(self):
         """Test successful validation of required fields"""
-        # Mock elements with valid values
-        scott_element = MagicMock()
-        scott_element.get.return_value = "US001"
-        desc_element = MagicMock()
-        desc_element.get.return_value = "Test Stamp"
+        # Set up mock elements with valid values
+        self.mock_elements["scott_number"].get.return_value = "US001"
+        self.mock_elements["description"].get.return_value = "Test Stamp"
         
-        # Create mock function and set it directly on the mock window
-        def mock_find_element(key):
-            if key == "scott_number":
-                return scott_element
-            elif key == "description":
-                return desc_element
-            return MagicMock()
-        
-        # Replace the find_element method directly
-        self.mock_window.find_element = mock_find_element
-        
+        print("DEBUG: Testing required fields validation with valid data")
         result = self.gui._validate_required_fields()
+        print(f"DEBUG: Validation result: {result}")
         self.assertTrue(result)
     
     def test_validate_required_fields_failure(self):
         """Test validation failure with empty required fields"""
-        scott_element = MagicMock()
-        scott_element.get.return_value = ""
-        desc_element = MagicMock()
-        desc_element.get.return_value = "Test Stamp"
-        
-        def mock_find_element(key):
-            if key == "scott_number":
-                return scott_element
-            elif key == "description":
-                return desc_element
-            return MagicMock()
-        
-        # Replace method directly instead of using side_effect
-        self.mock_window.find_element = mock_find_element
+        # Set up mock elements with invalid values (empty scott_number)
+        self.mock_elements["scott_number"].get.return_value = ""
+        self.mock_elements["description"].get.return_value = "Test Stamp"
         
         with patch('enhanced_gui.sg.popup_error') as mock_popup:
+            print("DEBUG: Testing required fields validation with invalid data")
             result = self.gui._validate_required_fields()
+            print(f"DEBUG: Validation result: {result}")
             self.assertFalse(result)
             mock_popup.assert_called_once()
 
@@ -198,32 +228,22 @@ class TestEnhancedStampGUICore(unittest.TestCase):
         numeric_fields = ["qty_used", "qty_mint", "catalog_value_used", 
                          "catalog_value_mint", "purchase_price", "current_market_value"]
         
-        elements = {}
+        # Set all numeric fields to valid values
         for field in numeric_fields:
-            element = MagicMock()
-            element.get.return_value = "10.50"
-            elements[field] = element
-        
-        def mock_find_element(key):
-            return elements.get(key, MagicMock())
-        
-        # Replace method directly
-        self.mock_window.find_element = mock_find_element
+            self.mock_elements[field].get.return_value = "10.50"
         
         result = self.gui._validate_numeric_fields()
         self.assertTrue(result)
     
     def test_validate_numeric_fields_failure(self):
         """Test validation failure with invalid numeric values"""
-        # Mock element with invalid numeric value
-        element = MagicMock()
-        element.get.return_value = "invalid_number"
+        numeric_fields = ["qty_used", "qty_mint", "catalog_value_used", 
+                         "catalog_value_mint", "purchase_price", "current_market_value"]
         
-        def mock_find_element(key):
-            return element
-        
-        # Replace find_element method directly
-        self.mock_window.find_element = mock_find_element
+        # Set first field to invalid value, others to valid
+        self.mock_elements[numeric_fields[0]].get.return_value = "invalid_number"
+        for field in numeric_fields[1:]:
+            self.mock_elements[field].get.return_value = "10.50"
         
         with patch('enhanced_gui.sg.popup_error') as mock_popup:
             result = self.gui._validate_numeric_fields()
@@ -232,26 +252,14 @@ class TestEnhancedStampGUICore(unittest.TestCase):
     
     def test_validate_date_success(self):
         """Test successful date validation"""
-        date_element = MagicMock()
-        date_element.get.return_value = "2023-01-15"
-        
-        def mock_find_element(key):
-            return date_element
-            
-        self.mock_window.find_element = mock_find_element
+        self.mock_elements["date_acquired"].get.return_value = "2023-01-15"
         
         result = self.gui._validate_date()
         self.assertTrue(result)
     
     def test_validate_date_failure(self):
         """Test date validation failure"""
-        date_element = MagicMock()
-        date_element.get.return_value = "invalid-date"
-        
-        def mock_find_element(key):
-            return date_element
-            
-        self.mock_window.find_element = mock_find_element
+        self.mock_elements["date_acquired"].get.return_value = "invalid-date"
         
         with patch('enhanced_gui.sg.popup_error') as mock_popup:
             result = self.gui._validate_date()
@@ -310,35 +318,23 @@ class TestEnhancedStampGUICore(unittest.TestCase):
             qty_mint=1
         )
         
-        # Mock form elements
-        elements = {}
-        field_names = [
-            "scott_number", "description", "country", "year", "denomination",
-            "color", "perforation", "location", "condition_grade", "gum_condition",
-            "used", "plate_block", "first_day_cover", "want_list", "for_sale",
-            "qty_used", "qty_mint", "catalog_value_used", "catalog_value_mint",
-            "purchase_price", "current_market_value", "date_acquired",
-            "source", "notes", "image_path"
-        ]
+        # Reset all mock calls before the test
+        for element in self.mock_elements.values():
+            element.update.reset_mock()
         
-        for field in field_names:
-            elements[field] = MagicMock()
-        
-        def mock_find_element(key):
-            return elements.get(key)
-        
-        # Replace find_element method directly
-        self.mock_window.find_element = mock_find_element
+        print("DEBUG: Starting load_stamp_to_form test")
         
         # Load stamp to form
         self.gui._load_stamp_to_form(test_stamp)
         
+        print("DEBUG: Checking update calls after load_stamp_to_form")
+        
         # Verify that update was called with correct values
-        elements["scott_number"].update.assert_called_with(value="US001")
-        elements["description"].update.assert_called_with(value="Test Stamp")
-        elements["country"].update.assert_called_with(value="USA")
-        elements["year"].update.assert_called_with(value=1990)
-        elements["used"].update.assert_called_with(value=False)
+        self.mock_elements["scott_number"].update.assert_called_with(value="US001")
+        self.mock_elements["description"].update.assert_called_with(value="Test Stamp")
+        self.mock_elements["country"].update.assert_called_with(value="USA")
+        self.mock_elements["year"].update.assert_called_with(value="1990")
+        self.mock_elements["used"].update.assert_called_with(value=False)
 
 
 class TestStampGUISearch(unittest.TestCase):
@@ -346,12 +342,19 @@ class TestStampGUISearch(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures"""
+        # Create all mock elements FIRST
+        self.mock_elements = {}
+        self._create_all_mock_elements()
+        
         # Create and store mock window
         self.mock_window = MagicMock()
         self.mock_window.read = MagicMock(return_value=(None, {}))
         self.mock_window.close = MagicMock()
-        self.mock_window.find_element = MagicMock()
         
+        def mock_find_element(key):
+            return self.mock_elements.get(key)
+        
+        self.mock_window.find_element = mock_find_element
         mock_sg.Window.return_value = self.mock_window
         
         with patch('enhanced_gui.DatabaseManager') as mock_db_class:
@@ -368,6 +371,40 @@ class TestStampGUISearch(unittest.TestCase):
             
             self.gui = EnhancedStampGUI()
             self.gui.db_manager = mock_db_instance
+            
+            # IMPORTANT: Override the GUI's window with our mock AFTER initialization
+            self.gui.window = self.mock_window
+    
+    def _create_all_mock_elements(self):
+        """Create all possible mock elements that might be accessed"""
+        all_fields = [
+            # Basic form fields
+            "scott_number", "description", "country", "year", "denomination",
+            "color", "perforation", "location", "source", "notes", "image_path",
+            # Numeric fields
+            "qty_used", "qty_mint", 
+            # Decimal fields
+            "catalog_value_used", "catalog_value_mint", "purchase_price", "current_market_value",
+            # Date fields
+            "date_acquired",
+            # Dropdown fields
+            "condition_grade", "gum_condition",
+            # Checkbox fields
+            "used", "plate_block", "first_day_cover", "want_list", "for_sale",
+            # Search fields
+            "search_desc", "search_scott", "search_country", "search_year_from", "search_year_to",
+            "search_used", "search_want",
+            # Table
+            "stamp_table",
+            # Tab group
+            "tab_group", "stats_display"
+        ]
+        
+        for field in all_fields:
+            mock_element = MagicMock()
+            mock_element.get = MagicMock(return_value='')
+            mock_element.update = MagicMock()
+            self.mock_elements[field] = mock_element
     
     def test_perform_search(self):
         """Test performing a search operation"""
@@ -390,12 +427,6 @@ class TestStampGUISearch(unittest.TestCase):
             'search_want': False
         }
         
-        # Mock table element with direct method replacement
-        table_element = MagicMock()
-        def mock_find_element(key):
-            return table_element
-        self.mock_window.find_element = mock_find_element
-        
         # Perform search
         self.gui._perform_search(values)
         
@@ -417,33 +448,33 @@ class TestStampGUISearch(unittest.TestCase):
     
     def test_clear_search(self):
         """Test clearing search results"""
-        # Set up mock elements for search fields
-        search_elements = {}
         search_fields = ['search_desc', 'search_scott', 'search_country', 
                         'search_year_from', 'search_year_to']
         search_checks = ['search_used', 'search_want']
         
-        for field in search_fields + search_checks:
-            search_elements[field] = MagicMock()
+        # Reset all mock calls before the test
+        for element in self.mock_elements.values():
+            element.update.reset_mock()
         
-        # Add table element
-        search_elements['stamp_table'] = MagicMock()
-        
-        def mock_find_element(key):
-            return search_elements.get(key)
-        
-        # Replace find_element method directly instead of using side_effect
-        self.mock_window.find_element = mock_find_element
-        
-        # Clear search
-        self.gui._clear_search()
-        
-        # Verify search fields were cleared
-        for field in search_fields:
-            search_elements[field].update.assert_called_with(value='')
-        
-        for check in search_checks:
-            search_elements[check].update.assert_called_with(value=False)
+        # Set up the _refresh_stamp_list method to avoid errors
+        with patch.object(self.gui, '_refresh_stamp_list') as mock_refresh:
+            print("DEBUG: Starting clear_search test")
+            
+            # Clear search
+            self.gui._clear_search()
+            
+            print("DEBUG: Checking search field updates")
+            
+            # Verify search fields were cleared
+            for field in search_fields:
+                print(f"DEBUG: Checking {field}, update called: {self.mock_elements[field].update.called}")
+                self.mock_elements[field].update.assert_called_with(value='')
+            
+            for check in search_checks:
+                self.mock_elements[check].update.assert_called_with(value=False)
+            
+            # Verify refresh was called
+            mock_refresh.assert_called_once()
 
 
 class TestStampGUICRUD(unittest.TestCase):
@@ -451,12 +482,19 @@ class TestStampGUICRUD(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures"""
+        # Create all mock elements FIRST
+        self.mock_elements = {}
+        self._create_all_mock_elements()
+        
         # Create and store mock window
         self.mock_window = MagicMock()
         self.mock_window.read = MagicMock(return_value=(None, {}))
         self.mock_window.close = MagicMock()
-        self.mock_window.find_element = MagicMock()
         
+        def mock_find_element(key):
+            return self.mock_elements.get(key)
+        
+        self.mock_window.find_element = mock_find_element
         mock_sg.Window.return_value = self.mock_window
         
         with patch('enhanced_gui.DatabaseManager') as mock_db_class:
@@ -473,6 +511,40 @@ class TestStampGUICRUD(unittest.TestCase):
             
             self.gui = EnhancedStampGUI()
             self.gui.db_manager = mock_db_instance
+            
+            # IMPORTANT: Override the GUI's window with our mock AFTER initialization
+            self.gui.window = self.mock_window
+    
+    def _create_all_mock_elements(self):
+        """Create all possible mock elements that might be accessed"""
+        all_fields = [
+            # Basic form fields
+            "scott_number", "description", "country", "year", "denomination",
+            "color", "perforation", "location", "source", "notes", "image_path",
+            # Numeric fields
+            "qty_used", "qty_mint", 
+            # Decimal fields
+            "catalog_value_used", "catalog_value_mint", "purchase_price", "current_market_value",
+            # Date fields
+            "date_acquired",
+            # Dropdown fields
+            "condition_grade", "gum_condition",
+            # Checkbox fields
+            "used", "plate_block", "first_day_cover", "want_list", "for_sale",
+            # Search fields
+            "search_desc", "search_scott", "search_country", "search_year_from", "search_year_to",
+            "search_used", "search_want",
+            # Table
+            "stamp_table",
+            # Tab group
+            "tab_group", "stats_display"
+        ]
+        
+        for field in all_fields:
+            mock_element = MagicMock()
+            mock_element.get = MagicMock(return_value='')
+            mock_element.update = MagicMock()
+            self.mock_elements[field] = mock_element
     
     def test_add_stamp_success(self):
         """Test successful stamp addition"""
@@ -509,16 +581,21 @@ class TestStampGUICRUD(unittest.TestCase):
         mock_add = MagicMock(return_value=1)
         self.gui.db_manager.add_stamp = mock_add
         
-        # Mock table element with direct method replacement
-        def mock_find_element(key):
-            return MagicMock()
-        self.mock_window.find_element = mock_find_element
-        
-        with patch('enhanced_gui.sg.popup') as mock_popup:
+        # Mock the helper methods
+        with patch.object(self.gui, '_clear_form') as mock_clear, \
+             patch.object(self.gui, '_refresh_stamp_list') as mock_refresh, \
+             patch.object(self.gui, '_update_statistics') as mock_stats, \
+             patch('enhanced_gui.sg.popup') as mock_popup:
+            
             self.gui._add_stamp(values)
             
             # Verify database method was called
             self.gui.db_manager.add_stamp.assert_called_once()
+            
+            # Verify helper methods were called
+            mock_clear.assert_called_once()
+            mock_refresh.assert_called_once()
+            mock_stats.assert_called_once()
             
             # Verify success popup was shown
             mock_popup.assert_called_once_with("Stamp added successfully!")
@@ -561,12 +638,21 @@ class TestStampGUICRUD(unittest.TestCase):
         mock_update = MagicMock()
         self.gui.db_manager.update_stamp = mock_update
         
-        with patch('enhanced_gui.sg.popup') as mock_popup:
+        with patch.object(self.gui, '_clear_form') as mock_clear, \
+             patch.object(self.gui, '_refresh_stamp_list') as mock_refresh, \
+             patch.object(self.gui, '_update_statistics') as mock_stats, \
+             patch('enhanced_gui.sg.popup') as mock_popup:
+            
             self.gui._update_stamp(values)
             
             # Verify database method was called with correct ID
             mock_update.assert_called_once()
             self.assertEqual(mock_update.call_args[0][0], 1)  # stamp_id
+            
+            # Verify helper methods were called
+            mock_clear.assert_called_once()
+            mock_refresh.assert_called_once() 
+            mock_stats.assert_called_once()
             
             # Verify success popup was shown
             mock_popup.assert_called_once_with("Stamp updated successfully!")
@@ -598,13 +684,10 @@ class TestStampGUICRUD(unittest.TestCase):
         mock_delete = MagicMock()
         self.gui.db_manager.delete_stamp = mock_delete
         
-        # Mock table element with direct method replacement
-        table_element = MagicMock()
-        def mock_find_element(key):
-            return table_element
-        self.mock_window.find_element = mock_find_element
-        
         with patch('enhanced_gui.sg.popup_yes_no', return_value='Yes') as mock_confirm, \
+             patch.object(self.gui, '_clear_form') as mock_clear, \
+             patch.object(self.gui, '_refresh_stamp_list') as mock_refresh, \
+             patch.object(self.gui, '_update_statistics') as mock_stats, \
              patch('enhanced_gui.sg.popup') as mock_popup:
             
             self.gui._delete_stamp()
@@ -614,6 +697,11 @@ class TestStampGUICRUD(unittest.TestCase):
             
             # Verify database method was called with correct ID
             mock_delete.assert_called_once_with(1)
+            
+            # Verify helper methods were called
+            mock_clear.assert_called_once()
+            mock_refresh.assert_called_once()
+            mock_stats.assert_called_once()
             
             # Verify success popup was shown
             mock_popup.assert_called_once_with("Stamp deleted successfully!")

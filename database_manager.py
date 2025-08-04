@@ -197,9 +197,13 @@ class DatabaseManager:
         # Calculate mint stamps
         stats['mint_stamps'] = stats['total_stamps'] - stats['used_stamps']
         
-        # Calculate total value
+        # Calculate total value - fixed calculation
         cursor.execute('''
-            SELECT SUM(CASE WHEN used=1 THEN catalog_value_used ELSE catalog_value_mint END)
+            SELECT 
+                SUM(CASE 
+                    WHEN used=1 THEN catalog_value_used * qty_used
+                    ELSE catalog_value_mint * qty_mint
+                END)
             FROM stamps
         ''')
         total_value = cursor.fetchone()[0] or 0
@@ -232,18 +236,18 @@ class DatabaseManager:
             return Stamp(
                 scott_number=str(row[1] or ''),
                 description=str(row[2] or ''),
-                country=str(row[3] or None),
+                country=row[3] if row[3] is not None else None,  # Fixed: don't convert None to string
                 year=int(row[4]) if row[4] else None,
-                denomination=str(row[5] or None),
-                color=str(row[6] or None),
+                denomination=row[5] if row[5] is not None else None,  # Fixed: don't convert None to string
+                color=row[6] if row[6] is not None else None,  # Fixed: don't convert None to string
                 condition_grade=str(row[7] or 'Unknown'),
                 gum_condition=str(row[8] or 'Unknown'),
-                perforation=str(row[9] or None),
+                perforation=row[9] if row[9] is not None else None,  # Fixed: don't convert None to string
                 used=bool(row[10]),
                 plate_block=bool(row[11]),
                 first_day_cover=bool(row[12]),
-                location=str(row[13] or None),
-                notes=str(row[14] or None),
+                location=row[13] if row[13] is not None else None,  # Fixed: don't convert None to string
+                notes=row[14] if row[14] is not None else None,  # Fixed: don't convert None to string
                 qty_mint=int(row[15] or 0),
                 qty_used=int(row[16] or 0),
                 catalog_value_mint=Decimal(str(row[17] or '0.00')),
@@ -252,9 +256,9 @@ class DatabaseManager:
                 current_market_value=Decimal(str(row[20] or '0.00')),
                 want_list=bool(row[21]),
                 for_sale=bool(row[22]),
-                date_acquired=str(row[23] or None),
-                source=str(row[24] or None),
-                image_path=str(row[25] or None)
+                date_acquired=row[23] if row[23] is not None else None,  # Fixed: don't convert None to string
+                source=row[24] if row[24] is not None else None,  # Fixed: don't convert None to string
+                image_path=row[25] if row[25] is not None else None  # Fixed: don't convert None to string
             )
         except Exception as e:
             print(f"Error creating stamp from row: {e}")

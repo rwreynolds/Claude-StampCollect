@@ -203,36 +203,46 @@ For Sale Items: {stats['for_sale_items']}
         """Clear all form fields"""
         fields = [
             "scott_number", "description", "country", "year", "denomination", 
-            "color", "perforation", "location", "condition_grade", "gum_condition",
-            "qty_used", "qty_mint", "catalog_value_used", "catalog_value_mint",
-            "purchase_price", "current_market_value", "date_acquired", "source",
-            "notes", "image_path"
+            "color", "perforation", "location", "source", "notes", "image_path"
         ]
         
         for field in fields:
             element = self.window.find_element(field)
             if element is not None:
-                try:
-                    if field in ["condition_grade", "gum_condition"]:
-                        element.update(value='Unknown')
-                    elif field in ["qty_used", "qty_mint"]:
-                        element.update(value='0')
-                    elif field in ["catalog_value_used", "catalog_value_mint", "purchase_price", "current_market_value"]:
-                        element.update(value='0.00')
-                    else:
-                        element.update(value='')
-                except Exception as e:
-                    print(f"Error clearing field {field}: {e}")
+                element.update(value='')
+        
+        # Handle dropdown fields separately
+        dropdown_fields = ["condition_grade", "gum_condition"]
+        for field in dropdown_fields:
+            element = self.window.find_element(field)
+            if element is not None:
+                element.update(value='Unknown')
+        
+        # Handle numeric fields
+        numeric_fields = ["qty_used", "qty_mint"]
+        for field in numeric_fields:
+            element = self.window.find_element(field)
+            if element is not None:
+                element.update(value='0')
+        
+        # Handle decimal fields
+        decimal_fields = ["catalog_value_used", "catalog_value_mint", "purchase_price", "current_market_value"]
+        for field in decimal_fields:
+            element = self.window.find_element(field)
+            if element is not None:
+                element.update(value='0.00')
+        
+        # Handle date field
+        date_element = self.window.find_element('date_acquired')
+        if date_element is not None:
+            date_element.update(value='')
         
         # Clear checkboxes safely
         checkboxes = ["used", "plate_block", "first_day_cover", "want_list", "for_sale"]
         for checkbox in checkboxes:
             element = self.window.find_element(checkbox)
             if element is not None:
-                try:
-                    element.update(value=False)
-                except Exception as e:
-                    print(f"Error clearing checkbox {checkbox}: {e}")
+                element.update(value=False)
         
         self.current_stamp_id = None
     
@@ -245,12 +255,12 @@ For Sale Items: {stats['for_sale_items']}
         fields = {
             "scott_number": stamp.scott_number,
             "description": stamp.description,
-            "country": stamp.country,
-            "year": stamp.year,
-            "denomination": stamp.denomination,
-            "color": stamp.color,
-            "perforation": stamp.perforation,
-            "location": stamp.location,
+            "country": stamp.country or "",
+            "year": str(stamp.year) if stamp.year else "",
+            "denomination": stamp.denomination or "",
+            "color": stamp.color or "",
+            "perforation": stamp.perforation or "",
+            "location": stamp.location or "",
             "condition_grade": stamp.condition_grade,
             "gum_condition": stamp.gum_condition,
             "used": stamp.used,
@@ -258,26 +268,23 @@ For Sale Items: {stats['for_sale_items']}
             "first_day_cover": stamp.first_day_cover,
             "want_list": stamp.want_list,
             "for_sale": stamp.for_sale,
-            "qty_used": stamp.qty_used,
-            "qty_mint": stamp.qty_mint,
+            "qty_used": str(stamp.qty_used),
+            "qty_mint": str(stamp.qty_mint),
             "catalog_value_used": f"{stamp.catalog_value_used:.2f}",
             "catalog_value_mint": f"{stamp.catalog_value_mint:.2f}",
             "purchase_price": f"{stamp.purchase_price:.2f}",
             "current_market_value": f"{stamp.current_market_value:.2f}",
             "date_acquired": stamp.date_acquired or "",
-            "source": stamp.source,
-            "notes": stamp.notes,
-            "image_path": stamp.image_path
+            "source": stamp.source or "",
+            "notes": stamp.notes or "",
+            "image_path": stamp.image_path or ""
         }
 
         # Safely update each field
         for key, value in fields.items():
             element = self.window.find_element(key)
             if element is not None:
-                try:
-                    element.update(value=value)
-                except Exception as e:
-                    print(f"Error updating {key}: {e}")
+                element.update(value=value)
 
     def _validate_required_fields(self):
         """Validate required fields"""
@@ -285,15 +292,10 @@ For Sale Items: {stats['for_sale_items']}
         for field in required:
             element = self.window.find_element(field)
             if element is None:
-                print(f"Error: Required field {field} not found")
                 return False
-            try:
-                value = element.get().strip()
-                if not value:
-                    sg.popup_error(f"{field.replace('_', ' ').title()} is required!")
-                    return False
-            except Exception as e:
-                print(f"Error validating {field}: {e}")
+            value = element.get()
+            if value is None or not value.strip():
+                sg.popup_error(f"{field.replace('_', ' ').title()} is required!")
                 return False
         return True
 
@@ -304,34 +306,35 @@ For Sale Items: {stats['for_sale_items']}
         for field in numeric_fields:
             element = self.window.find_element(field)
             if element is None:
-                print(f"Error: Numeric field {field} not found")
                 return False
-            try:
-                value = element.get()
-                if value:
-                    Decimal(value)
-            except (InvalidOperation, Exception) as e:
+            value = element.get()
+            if value is None:
                 sg.popup_error(f"Invalid numeric value in {field.replace('_', ' ').title()}")
-                print(f"Error validating {field}: {e}")
                 return False
+            if value.strip():  # Only validate if not empty
+                try:
+                    Decimal(value)
+                except InvalidOperation:
+                    sg.popup_error(f"Invalid numeric value in {field.replace('_', ' ').title()}")
+                    return False
         return True
 
     def _validate_date(self):
         """Validate date_acquired field"""
         element = self.window.find_element('date_acquired')
         if element is None:
-            print("Error: Date field not found")
             return False
-        try:
-            date_str = element.get()
-            if date_str:
-                datetime.strptime(date_str, "%Y-%m-%d")
-        except ValueError:
+        date_str = element.get()
+        if date_str is None:
             sg.popup_error("Invalid date format. Use YYYY-MM-DD")
             return False
-        except Exception as e:
-            print(f"Error validating date: {e}")
-            return False
+        date_str = date_str.strip()
+        if date_str:  # Only validate if not empty
+            try:
+                datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                sg.popup_error("Invalid date format. Use YYYY-MM-DD")
+                return False
         return True
 
     def _switch_to_edit_tab(self):
@@ -468,21 +471,18 @@ For Sale Items: {stats['for_sale_items']}
 
     def _clear_search(self):
         """Clear search results and show all stamps"""
-        try:
-            self._refresh_stamp_list()
-            search_fields = ['search_desc', 'search_scott', 'search_country', 
-                           'search_year_from', 'search_year_to']
-            for field in search_fields:
-                element = self.window.find_element(field)
-                if element is not None:
-                    element.update(value='')
-            search_checks = ['search_used', 'search_want']
-            for check in search_checks:
-                element = self.window.find_element(check)
-                if element is not None:
-                    element.update(value=False)
-        except Exception as e:
-            print(f"Error clearing search: {e}")
+        self._refresh_stamp_list()
+        search_fields = ['search_desc', 'search_scott', 'search_country', 
+                       'search_year_from', 'search_year_to']
+        for field in search_fields:
+            element = self.window.find_element(field)
+            if element is not None:
+                element.update(value='')
+        search_checks = ['search_used', 'search_want']
+        for check in search_checks:
+            element = self.window.find_element(check)
+            if element is not None:
+                element.update(value=False)
 
     def _handle_table_select(self, values):
         """Handle stamp selection from table"""
