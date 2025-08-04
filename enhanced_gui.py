@@ -56,6 +56,7 @@ class EnhancedStampGUI:
         # Stamp list
         headings = ['ID', 'Scott #', 'Description', 'Country', 'Year', 'Condition', 'Value']
         stamp_list_frame = [
+            [sg.Text("Double-click a row to edit stamp")],
             [sg.Table(
                 values=[],
                 headings=headings,
@@ -389,10 +390,20 @@ For Sale Items: {stats['for_sale_items']}
         """Switch to the Add/Edit tab"""
         try:
             tab_group = self.window.find_element('tab_group')
-            if tab_group is not None:
-                tab_group.update(value='tab_edit')  # Use the key we defined for the edit tab
+            if tab_group is not None and tab_group.Widget is not None:
+                try:
+                    # Try the most direct approach
+                    tab_group.Widget.select(1)  # Select second tab (Add/Edit)
+                    return True
+                except Exception as e:
+                    print(f"Tab switching failed: {e}")
+                    return False
+            else:
+                print("Tab group or widget not available")
+                return False
         except Exception as e:
             print(f"Error switching to edit tab: {e}")
+            return False
 
     def run(self):
         """Main event loop for the GUI"""
@@ -411,12 +422,17 @@ For Sale Items: {stats['for_sale_items']}
                 if event == 'tab_group':
                     self._handle_tab_selection(event)
                     continue
-                
-                # Handle table double-click events
-                if isinstance(event, tuple) and len(event) == 3:
-                    element, event_type, data = event
-                    if element == 'stamp_table' and event_type == '+DOUBLE CLICK+':
-                        self._handle_table_double_click(data)
+
+                # Handle table double-click events - FIXED: Better detection
+                if isinstance(event, tuple) and len(event) >= 2:
+                    element_key = event[0]
+                    event_type = event[1]
+                    
+                    if element_key == 'stamp_table' and '+DOUBLE CLICK+' in str(event_type):
+                        # Get the selected row from values instead of complex event parsing
+                        if 'stamp_table' in values and len(values['stamp_table']) > 0:
+                            row = values['stamp_table'][0]
+                            self._handle_table_double_click(row)
                         continue
                 
                 # Handle other events
@@ -435,6 +451,7 @@ For Sale Items: {stats['for_sale_items']}
                 elif event == 'Clear Search':
                     self._clear_search()
                 elif event == 'stamp_table':
+                    # Keep the original single-click behavior
                     self._handle_table_select(values)
                 
             except Exception as e:
@@ -443,15 +460,24 @@ For Sale Items: {stats['for_sale_items']}
         
         self.window.close()
 
-    def _handle_table_double_click(self, data):
+    def _handle_table_double_click(self, row):
         """Handle double-click on stamp table"""
         try:
-            row = data[0]  # Get the row that was double-clicked
+            print(f"Double-click detected on row: {row}")
+            
             if 0 <= row < len(self.search_results):
                 stamp_id, stamp = self.search_results[row]
+                print(f"Loading stamp for editing: {stamp.scott_number} (ID: {stamp_id})")
+                
                 self.current_stamp_id = stamp_id
                 self._load_stamp_to_form(stamp)
-                self._switch_to_edit_tab()
+                
+                # Try to switch to edit tab
+                if self._switch_to_edit_tab():
+                    sg.popup_quick_message(f"Editing: {stamp.scott_number}", auto_close_duration=1)
+                else:
+                    sg.popup_quick_message(f"Loaded: {stamp.scott_number}\nClick 'Add/Edit Stamps' tab to edit", auto_close_duration=2)
+                    
         except Exception as e:
             print(f"Error handling table double-click: {e}")
 
