@@ -1,4 +1,4 @@
-# main.py
+# main.py - 
 from enhanced_gui import EnhancedStampGUI
 
 def main():
