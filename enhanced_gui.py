@@ -4,8 +4,77 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import os
 import csv
+import time
+import platform
+from typing import Optional, Tuple
 from database_manager import DatabaseManager
 from enhanced_stamp import Stamp, StampCollection
+
+class MacOSDoubleClickHandler:
+    def __init__(self, double_click_threshold=None):
+        """
+        Initialize double-click handler with platform-optimized settings
+        
+        Args:
+            double_click_threshold: Maximum time between clicks to register as double-click (seconds)
+        """
+        # Platform-specific timing
+        if double_click_threshold is None:
+            self.double_click_threshold = 0.3 if self._is_macos() else 0.5
+        else:
+            self.double_click_threshold = double_click_threshold
+            
+        self.last_click_time = 0
+        self.last_clicked_row = None
+        
+    def _is_macos(self) -> bool:
+        """Check if running on macOS"""
+        return platform.system() == 'Darwin'
+        
+    def handle_table_event(self, event, values, table_key='stamp_table') -> Tuple[bool, Optional[int]]:
+        """
+        Handle table click events and detect double-clicks
+        
+        Returns:
+            Tuple of (is_double_click, selected_row)
+        """
+        current_time = time.time()
+        is_double_click = False
+        selected_row = None
+        
+        # Check if this is a table event
+        if event == table_key and table_key in values:
+            if len(values[table_key]) > 0:
+                selected_row = values[table_key][0]
+                
+                # Check for double-click
+                time_diff = current_time - self.last_click_time
+                if (time_diff <= self.double_click_threshold and 
+                    selected_row == self.last_clicked_row and
+                    time_diff > 0.05):  # Prevent immediate re-triggers
+                    is_double_click = True
+                
+                self.last_click_time = current_time
+                self.last_clicked_row = selected_row
+        
+        # Also handle the tuple-based event format that FreeSimpleGUI sometimes uses
+        elif isinstance(event, tuple) and len(event) >= 2:
+            element_key = event[0]
+            event_type = str(event[1])
+            
+            if element_key == table_key:
+                if any(keyword in event_type.upper() for keyword in ['DOUBLE', 'DBL', '+2+']):
+                    # Direct double-click detection
+                    if table_key in values and len(values[table_key]) > 0:
+                        selected_row = values[table_key][0]
+                        is_double_click = True
+        
+        return is_double_click, selected_row
+    
+    def reset_click_state(self):
+        """Reset click state to prevent triple-click issues"""
+        self.last_click_time = 0
+        self.last_clicked_row = None
 
 class EnhancedStampGUI:
     def __init__(self):
@@ -13,6 +82,9 @@ class EnhancedStampGUI:
         self.collection = self.db_manager.load_collection()
         self.current_stamp_id = None
         self.search_results = []
+        
+        # Initialize double-click handler
+        self.double_click_handler = MacOSDoubleClickHandler()
         
         # Set theme
         sg.theme('DarkTeal9')
@@ -30,12 +102,16 @@ class EnhancedStampGUI:
         self._refresh_stamp_list()
         self._update_statistics()
     
+    def _is_macos(self) -> bool:
+        """Check if running on macOS"""
+        return platform.system() == 'Darwin'
+    
     def _create_layouts(self):
         """Create all GUI layouts"""
-        # Menu bar
+        # Menu bar with macOS-style shortcuts
         menu_def = [
-            ['&File', ['&New Collection', '&Import CSV', '&Export CSV', '&Backup Database', 'E&xit']],
-            ['&Edit', ['&Add Stamp', '&Edit Stamp', '&Delete Stamp']],
+            ['&File', ['&New Collection::Cmd+N', '&Import CSV', '&Export CSV', '&Backup Database', 'E&xit::Cmd+Q']],
+            ['&Edit', ['&Add Stamp::Cmd+A', '&Edit Stamp::Cmd+E', '&Delete Stamp::Cmd+D']],
             ['&View', ['&Statistics', '&Want List', '&For Sale List']],
             ['&Help', ['&About']]
         ]
@@ -53,22 +129,33 @@ class EnhancedStampGUI:
              sg.Button("Search"), sg.Button("Clear Search")]
         ]
         
-        # Stamp list
+        # Stamp list with enhanced configuration for better click handling
         headings = ['ID', 'Scott #', 'Description', 'Country', 'Year', 'Condition', 'Value']
+        
+        # Platform-specific table configuration
+        table_config = {
+            'enable_events': True,
+            'enable_click_events': True,
+            'select_mode': sg.TABLE_SELECT_MODE_BROWSE,
+            'auto_size_columns': False,
+            'col_widths': [5, 12, 30, 15, 8, 12, 10],
+            'num_rows': 15,
+            'expand_x': True,
+            'expand_y': True
+        }
+        
+        # Add macOS-specific enhancements
+        if self._is_macos():
+            table_config['bind_return_key'] = True
+            table_config['right_click_menu'] = ['Right', ['Edit Stamp', 'Delete Stamp', '---', 'View Details']]
+        
         stamp_list_frame = [
-            [sg.Text("Double-click a row to edit stamp")],
+            [sg.Text("Double-click a row to edit stamp" + (" (or Control+click for menu)" if self._is_macos() else ""))],
             [sg.Table(
                 values=[],
                 headings=headings,
                 key="stamp_table",
-                select_mode=sg.TABLE_SELECT_MODE_BROWSE,
-                enable_events=True,
-                enable_click_events=True,  # Enable click events for double-click detection
-                auto_size_columns=False,
-                col_widths=[5, 12, 30, 15, 8, 12, 10],
-                num_rows=15,
-                expand_x=True,
-                expand_y=True
+                **table_config
             )]
         ]
         
@@ -124,7 +211,7 @@ class EnhancedStampGUI:
             [sg.Text("", key="stats_display", size=(60, 6), font=('Courier', 10))]
         ]
         
-        # Main layout with tabs - IMPORTANT: enable_events=True for tab selection detection
+        # Main layout with tabs
         tab1_layout = [
             [sg.Frame("Search", search_frame, expand_x=True)],
             [sg.Frame("Stamp Collection", stamp_list_frame, expand_x=True, expand_y=True)]
@@ -144,7 +231,7 @@ class EnhancedStampGUI:
                 [sg.Tab('Browse Collection', tab1_layout, key='tab_browse')],
                 [sg.Tab('Add/Edit Stamps', tab2_layout, key='tab_edit')],
                 [sg.Tab('Statistics', tab3_layout, key='tab_stats')]
-            ], expand_x=True, expand_y=True, key='tab_group', enable_events=True)]  # Enable events for tab selection
+            ], expand_x=True, expand_y=True, key='tab_group', enable_events=True)]
         ]
     
     def _refresh_stamp_list(self, stamps=None):
@@ -234,13 +321,10 @@ For Sale Items: {stats['for_sale_items']}
                 # Get the currently selected tab
                 tab_group = self.window.find_element('tab_group')
                 if tab_group is not None:
-                    # The selected tab key will be in the tab_group's value
-                    # Note: Different versions of FreeSimpleGUI might handle this differently
                     print("Browse Collection tab selected - refreshing stamp list")
                     self._refresh_all_stamps_from_database()
             
             # Alternative method: Check if the tab was specifically clicked
-            # This handles cases where the event might be different
             elif event in ['tab_browse', 'Browse Collection']:
                 print("Browse Collection tab selected - refreshing stamp list")
                 self._refresh_all_stamps_from_database()
@@ -405,11 +489,62 @@ For Sale Items: {stats['for_sale_items']}
             print(f"Error switching to edit tab: {e}")
             return False
 
+    def _handle_keyboard_shortcuts(self, event, values):
+        """Handle keyboard shortcuts, including macOS Command key combinations"""
+        try:
+            event_str = str(event).lower()
+            
+            # Handle macOS Command key combinations
+            if self._is_macos() and ('cmd' in event_str or 'command' in event_str):
+                if 'n' in event_str:  # Cmd+N - New stamp
+                    self._clear_form()
+                    self._switch_to_edit_tab()
+                elif 's' in event_str:  # Cmd+S - Save
+                    if self._validate_all_fields():
+                        if self.current_stamp_id:
+                            self._update_stamp(values)
+                        else:
+                            self._add_stamp(values)
+                elif 'd' in event_str:  # Cmd+D - Delete
+                    self._delete_stamp()
+                elif 'e' in event_str:  # Cmd+E - Edit
+                    if self.current_stamp_id:
+                        self._switch_to_edit_tab()
+                elif 'q' in event_str:  # Cmd+Q - Quit
+                    return 'Exit'
+            
+            # Handle Control key combinations for other platforms
+            elif 'control' in event_str or 'ctrl' in event_str:
+                if 'n' in event_str:
+                    self._clear_form()
+                    self._switch_to_edit_tab()
+                elif 's' in event_str:
+                    if self._validate_all_fields():
+                        if self.current_stamp_id:
+                            self._update_stamp(values)
+                        else:
+                            self._add_stamp(values)
+                elif 'delete' in event_str or 'del' in event_str:
+                    self._delete_stamp()
+            
+            # Handle Enter key on table
+            elif event_str == 'return' or event_str == '\r':
+                if 'stamp_table' in values and len(values['stamp_table']) > 0:
+                    selected_row = values['stamp_table'][0]
+                    self._handle_table_double_click(selected_row)
+                    
+        except Exception as e:
+            print(f"Error handling keyboard shortcut: {e}")
+        
+        return None
+
     def run(self):
-        """Main event loop for the GUI"""
+        """Main event loop with improved macOS double-click handling"""
         while True:
             try:
-                read_result = self.window.read()
+                # Use timeout for better responsiveness, especially on macOS
+                read_result = self.window.read(timeout=100)
+                
                 if read_result is None:
                     break
                     
@@ -418,22 +553,48 @@ For Sale Items: {stats['for_sale_items']}
                 if event in (None, 'Exit'):
                     break
                 
-                # Handle tab selection events - IMPORTANT: This must come early in the event handling
+                # Handle keyboard shortcuts first
+                shortcut_result = self._handle_keyboard_shortcuts(event, values)
+                if shortcut_result == 'Exit':
+                    break
+                elif shortcut_result is not None:
+                    continue
+                
+                # Handle double-click detection with improved algorithm
+                is_double_click, selected_row = self.double_click_handler.handle_table_event(
+                    event, values, 'stamp_table'
+                )
+                
+                if is_double_click and selected_row is not None:
+                    print(f"Double-click detected on row {selected_row}")
+                    self._handle_table_double_click(selected_row)
+                    self.double_click_handler.reset_click_state()  # Prevent triple-click issues
+                    continue
+                
+                # Handle tab selection events
                 if event == 'tab_group':
                     self._handle_tab_selection(event)
                     continue
 
-                # Handle table double-click events - FIXED: Better detection
-                if isinstance(event, tuple) and len(event) >= 2:
-                    element_key = event[0]
-                    event_type = event[1]
-                    
-                    if element_key == 'stamp_table' and '+DOUBLE CLICK+' in str(event_type):
-                        # Get the selected row from values instead of complex event parsing
+                # Handle single table click (for selection)
+                elif event == 'stamp_table':
+                    self._handle_table_select(values)
+                    continue
+                
+                # Handle right-click context menu items (macOS)
+                elif event in ['Edit Stamp', 'Delete Stamp', 'View Details']:
+                    if event == 'Edit Stamp':
                         if 'stamp_table' in values and len(values['stamp_table']) > 0:
-                            row = values['stamp_table'][0]
-                            self._handle_table_double_click(row)
-                        continue
+                            selected_row = values['stamp_table'][0]
+                            self._handle_table_double_click(selected_row)
+                    elif event == 'Delete Stamp':
+                        self._delete_stamp()
+                    elif event == 'View Details':
+                        if 'stamp_table' in values and len(values['stamp_table']) > 0:
+                            selected_row = values['stamp_table'][0]
+                            self._handle_table_select(values)
+                            self._switch_to_edit_tab()
+                    continue
                 
                 # Handle other events
                 if event == 'Clear Form':
@@ -450,9 +611,6 @@ For Sale Items: {stats['for_sale_items']}
                     self._perform_search(values)
                 elif event == 'Clear Search':
                     self._clear_search()
-                elif event == 'stamp_table':
-                    # Keep the original single-click behavior
-                    self._handle_table_select(values)
                 
             except Exception as e:
                 print(f"Error in event loop: {e}")
@@ -495,7 +653,7 @@ For Sale Items: {stats['for_sale_items']}
             stamp = self._create_stamp_from_values(values)
             self.db_manager.add_stamp(stamp)
             self._clear_form()
-            self._refresh_all_stamps_from_database()  # Use the new method that reloads from DB
+            self._refresh_all_stamps_from_database()
             self._update_statistics()
             sg.popup("Stamp added successfully!")
         except Exception as e:
@@ -510,7 +668,7 @@ For Sale Items: {stats['for_sale_items']}
             stamp = self._create_stamp_from_values(values)
             self.db_manager.update_stamp(self.current_stamp_id, stamp)
             self._clear_form()
-            self._refresh_all_stamps_from_database()  # Use the new method that reloads from DB
+            self._refresh_all_stamps_from_database()
             self._update_statistics()
             sg.popup("Stamp updated successfully!")
         except Exception as e:
@@ -525,7 +683,7 @@ For Sale Items: {stats['for_sale_items']}
             if sg.popup_yes_no("Are you sure you want to delete this stamp?") == 'Yes':
                 self.db_manager.delete_stamp(self.current_stamp_id)
                 self._clear_form()
-                self._refresh_all_stamps_from_database()  # Use the new method that reloads from DB
+                self._refresh_all_stamps_from_database()
                 self._update_statistics()
                 sg.popup("Stamp deleted successfully!")
         except Exception as e:
@@ -550,7 +708,7 @@ For Sale Items: {stats['for_sale_items']}
 
     def _clear_search(self):
         """Clear search results and show all stamps"""
-        self._refresh_all_stamps_from_database()  # Use the new method that reloads from DB
+        self._refresh_all_stamps_from_database()
         search_fields = ['search_desc', 'search_scott', 'search_country', 
                        'search_year_from', 'search_year_to']
         for field in search_fields:
@@ -571,7 +729,8 @@ For Sale Items: {stats['for_sale_items']}
                 if 0 <= selected_row < len(self.search_results):
                     stamp_id, stamp = self.search_results[selected_row]
                     self.current_stamp_id = stamp_id
-                    self._load_stamp_to_form(stamp)
+                    # Don't automatically load to form on single click - just store selection
+                    print(f"Selected stamp: {stamp.scott_number} (ID: {stamp_id})")
         except Exception as e:
             print(f"Error handling table selection: {e}")
 
@@ -580,27 +739,27 @@ For Sale Items: {stats['for_sale_items']}
         return Stamp(
             scott_number=values['scott_number'],
             description=values['description'],
-            country=values['country'],
+            country=values['country'] if values['country'].strip() else None,
             year=int(values['year']) if values['year'].strip() else None,
-            denomination=values['denomination'],
-            color=values['color'],
+            denomination=values['denomination'] if values['denomination'].strip() else None,
+            color=values['color'] if values['color'].strip() else None,
             condition_grade=values['condition_grade'],
             gum_condition=values['gum_condition'],
-            perforation=values['perforation'],
+            perforation=values['perforation'] if values['perforation'].strip() else None,
             used=values['used'],
             plate_block=values['plate_block'],
             first_day_cover=values['first_day_cover'],
-            location=values['location'],
-            notes=values['notes'],
-            qty_mint=int(values['qty_mint']),
-            qty_used=int(values['qty_used']),
-            catalog_value_mint=Decimal(values['catalog_value_mint']),
-            catalog_value_used=Decimal(values['catalog_value_used']),
-            purchase_price=Decimal(values['purchase_price']),
-            current_market_value=Decimal(values['current_market_value']),
+            location=values['location'] if values['location'].strip() else None,
+            notes=values['notes'] if values['notes'].strip() else None,
+            qty_mint=int(values['qty_mint']) if values['qty_mint'].strip() else 0,
+            qty_used=int(values['qty_used']) if values['qty_used'].strip() else 0,
+            catalog_value_mint=Decimal(values['catalog_value_mint']) if values['catalog_value_mint'].strip() else Decimal('0.00'),
+            catalog_value_used=Decimal(values['catalog_value_used']) if values['catalog_value_used'].strip() else Decimal('0.00'),
+            purchase_price=Decimal(values['purchase_price']) if values['purchase_price'].strip() else Decimal('0.00'),
+            current_market_value=Decimal(values['current_market_value']) if values['current_market_value'].strip() else Decimal('0.00'),
             want_list=values['want_list'],
             for_sale=values['for_sale'],
-            date_acquired=values['date_acquired'] if values['date_acquired'] else None,
-            source=values['source'],
-            image_path=values['image_path']
+            date_acquired=values['date_acquired'] if values['date_acquired'].strip() else None,
+            source=values['source'] if values['source'].strip() else None,
+            image_path=values['image_path'] if values['image_path'].strip() else None
         )
